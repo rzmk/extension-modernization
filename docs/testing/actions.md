@@ -216,3 +216,76 @@ def test_item_create_payload(item_factory):
     assert result["title"] == "Custom Title"
     assert "id" in result
 ```
+
+---
+
+## Black-Box Action Testing vs. Monkeypatching
+
+Actions are the top-level API entry points for your extension's business
+logic. Therefore, you should treat actions as **black boxes**: invoke them with
+valid inputs and assert their public return results or external side-effects
+(e.g. data created/purged in the database, emails sent).
+
+Unless your action communicates with an external, unavailable third-party
+service, **avoid monkeypatching action internals**.
+
+Mocking internal action calls makes tests highly fragile and closely coupled to
+implementation details. If the underlying code is refactored, the test will
+break even if the behavior remains completely correct.
+
+The following example shows the test that rely in internal implementation of
+the action and can break every time the action is changed.
+
+/// admonition | The Fragile Approach
+    type: warning
+
+```python
+def test_delete_details(self, monkeypatch, sysadmin):
+    stub = mock.Mock()
+    context = {"user": sysadmin["name"]}
+
+    monkeypatch.setattr(actions, "_internal_function", mock)
+    helpers.call_action("delete_details", context, id=id)
+
+    assert stub.assert_called()
+```
+
+
+///
+
+
+Instead of testing internal steps of the action, verify the actual
+side-effects. Ensure that the item is permanently deleted from the database
+by attempting to query or fetch it after the action runs:
+
+/// admonition | Stable test
+    type: example
+
+```python
+def test_delete_details(self, package_factory):
+    item = package_factory(type="details") # (1)!
+
+    helpers.call_action("delete_details", id=item["id"]) # (2)!
+
+    with pytest.raises(toolkit.ObjectNotFound): # (3)!
+        helpers.call_action("details_show", id=item["id"])
+```
+
+1. Initialize data using factories
+2. Invoke the delete action (omitting redundant context parameters)
+3. Assert side-effect: details record no longer exists in CKAN
+
+///
+
+
+/// admonition | Omit Redundant Context Parameters
+    type: tip
+
+In the correct example above, the `context` dictionary parameter is omitted
+from `helpers.call_action`. By default, `call_action` runs with an
+authenticated sysadmin context. Passing a custom `context` object to
+`call_action` is redundant and clutters the test setup unless you are
+explicitly testing permission overrides or auth validation logic (which should
+be isolated in `test_auth.py` files).
+
+///
