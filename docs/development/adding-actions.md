@@ -220,6 +220,57 @@ via `context["auth_user_obj"]` without making redundant database queries.
 
 ---
 
+## Calling Actions from Within Actions
+
+When implementing specialized wrapper actions or grouping complex, multi-step
+logic into a single action, you will often need to invoke nested actions from
+within your parent action code.
+
+### The Security Hazard of Context Contamination
+
+The `context` dictionary of the parent action carries active state variables,
+authorization caches, and permission modifiers (like `ignore_auth=True` or
+administrative user overrides).
+
+If you pass the parent action's `context` directly to a nested `get_action`
+call, the child action will inherit all of these parameters. This creates
+severe authorization leaks (e.g., bypassing permission checks on nested
+operations) and cache contamination.
+
+To prevent context leaking, always wrap the parent context using
+`tk.fresh_context(context)` before passing it to nested action calls.
+
+`fresh_context` returns a clean, isolated copy of the context dictionary that
+retains essential items (like `user` and `session`) but strips out transient
+authorization states, user overrides, and local cached data:
+
+```python
+from typing import Any
+import ckan.plugins.toolkit as tk
+from ckan import types
+
+def myextension_item_batch_create(context: types.Context, data_dict: dict[str, Any]) -> list[dict[str, Any]]:
+    tk.check_access("myextension_item_batch_create", context, data_dict) # (1)!
+
+    results = []
+    for item_data in data_dict["items"]:
+        child_context = tk.fresh_context(context) # (2)!
+
+
+        new_item = tk.get_action("myextension_item_create")(  # (3)!
+            child_context, item_data
+        )
+        results.append(new_item)
+
+    return results
+```
+
+1. Authorize the parent batch action
+2. Generate a clean context copy for the nested child action call to ensure authorization checks run independently in the sub-call
+3. Invoke the child action using the fresh context
+
+---
+
 ## Auto-Registration
 
 Simply decorate your plugin class with `@blanket.actions` and
