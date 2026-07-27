@@ -122,6 +122,9 @@ def myextension_item_create(context: types.Context, data_dict: dict[str, Any]) -
 
 Auth functions verify if a user in the context is allowed to run the corresponding action.
 
+/// admonition
+    type: example
+
 ```python title="logic/auth.py"
 from __future__ import annotations
 
@@ -134,8 +137,6 @@ def myextension_item_create(context: Context, data_dict: dict[str, Any]) -> dict
 
     Only administrators are allowed to create items.
     """
-    user = context.get("user")
-
     # check if user is admin
     is_admin = tk.check_access("sysadmin", context, {})
     if not is_admin:
@@ -144,25 +145,66 @@ def myextension_item_create(context: Context, data_dict: dict[str, Any]) -> dict
     return {"success": True}
 ```
 
-/// note
+///
 
-By default, sysadmins skip authorization checks in CKAN. Because of it, the
-example above can be rewritten to a simpler form.
 
-```py title="logic/auth.py"
+### Authorization Shortcuts
 
-def myextension_item_create(context: Context, data_dict: dict[str, Any]) -> dict[str, Any]:
-    return {"success": False, "msg": "Only sysadmins can create items"}
+By default, sysadmin users bypass all custom authorization checks in CKAN. The
+auth function is never called for a sysadmin user. Because of this, if an
+action requires sysadmin-only access, the auth function can simply return a
+failure payload:
 
+/// admonition | Sysadmin check
+    type: example
+
+```python
+def myextension_admin_action(context: Context, data_dict: dict[str, Any]) -> dict[str, Any]:
+    # Sysadmins bypass this and succeed automatically.
+    # Non-sysadmin users will execute this and get blocked.
+    return {"success": False, "msg": "Only sysadmins are authorized"}
 ```
-
-For sysadmin this function won't even get called. Any other non-sysadmin user
-will receive `False` from it and won't pass the authorization check.
 
 ///
 
 
----
+To verify that a user is logged in (i.e. not anonymous), decorate the function
+with `#!python @tk.auth_disallow_anonymous_access`. If this decorator is
+present, you can safely return `#!python {"success": True}`
+unconditionally - CKAN will automatically intercept and reject any anonymous
+requests before running your code:
+
+/// admonition | Authentication check
+    type: example
+
+```python
+@tk.auth_disallow_anonymous_access
+def myextension_user_profile_edit(context: Context, data_dict: dict[str, Any]) -> dict[str, Any]:
+    # Safe to return True unconditionally; CKAN guarantees the user is logged in
+    return {"success": True}
+```
+
+///
+
+
+Conversely, if an auth function must be accessible by non-logged-in users, you
+must explicitly decorate it with `#!python @tk.auth_allow_anonymous_access`. If this
+decorator is missing, CKAN defaults to blocking anonymous requests before
+invoking the function:
+
+/// admonition | Anonymous access
+    type: example
+
+```python
+@tk.auth_allow_anonymous_access
+def myextension_public_items_view(context: Context, data_dict: dict[str, Any]) -> dict[str, Any]:
+    # Explicitly allowed for anonymous users
+    return {"success": True}
+```
+
+///
+
+----
 
 ## Invoking Actions and Auth Checks
 

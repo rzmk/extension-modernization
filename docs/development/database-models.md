@@ -136,6 +136,91 @@ class MyExtensionItem:
 
 ---
 
+## Model Dictization
+
+API actions in CKAN must return JSON-serializable dictionaries rather than
+database-bound SQLAlchemy objects. Because of this, every database model should
+define a `dictize` method to convert object records into flat Python
+dictionaries.
+
+For simple models, start by importing and calling CKAN's core `table_dictize`
+utility. It automatically converts core SQLAlchemy table columns into basic
+Python datatypes.
+
+/// admonition | `table_dictize`
+    type: example
+
+```python
+from ckan.lib.dictization import table_dictize
+
+def dictize(self) -> dict[str, Any]:
+    # Pass an empty context dictionary since table_dictize only
+    # requires it for compatibility
+    return table_dictize(self, {})
+```
+
+///
+
+
+
+If your model contains related tables (e.g. references to owner user profiles)
+or computed attributes that need to be exposed in the dictionary, extend the
+return dictionary of `table_dictize` directly:
+
+/// admonition | Extending Dictization Outputs
+    type: example
+
+```python
+def dictize(self) -> dict[str, Any]:
+    # Start with the standard column dictionary
+    result = table_dictize(self, {})
+
+    # Extend it with related field attributes
+    if self.owner:
+        result["owner_name"] = self.owner.name
+
+    return result
+```
+
+///
+
+
+/// admonition | Configuration Options via Keyword-Only Parameters
+    type: note
+
+You might want to configure the level of detail returned by your `dictize` method (for example, to include or exclude a list of related items to save performance).
+
+**The Antipattern**: Avoid passing the entire CKAN `context` dictionary (which is polluted with database sessions, authorization details, and caching keys) to control serialization detail.
+
+**The Solution**: Declare **keyword-only parameters** directly in the `dictize` method signature. This defines clear, type-checked parameters:
+
+```python
+from typing import Any
+from ckan.lib.dictization import table_dictize
+
+class MyExtensionItem(Base):
+    # ... columns and attributes ...
+
+    def dictize(self, include_owner_details: bool = False) -> dict[str, Any]:
+        """Convert the database record to a serialized dictionary."""
+        result = table_dictize(self, {})
+
+        # Explicitly check keyword-only parameter configuration
+        if include_owner_details and self.owner:
+            result["owner"] = {
+                "id": self.owner.id,
+                "name": self.owner.name,
+                "email": self.owner.email,
+            }
+
+        return result
+```
+
+///
+
+
+---
+
 ## Querying Models
 
 SQLAlchemy v2 uses the `session.execute` or `session.scalar` syntax. Avoid legacy `session.query` calls:
@@ -147,5 +232,12 @@ item = session.scalar(stmt)
 
 # Querying multiple records
 stmt = sa.select(MyExtensionItem).order_by(MyExtensionItem.created.desc())
-items = session.scalars(stmt).all()
+items = session.scalars(stmt)
+
+# Remove records
+stmt = sa.delete(MyExtensionItem).where(MyExtensionItem.name == name)
+items = session.execute(stmt)
+session.commit()
+
+
 ```
